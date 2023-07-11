@@ -1,0 +1,362 @@
+---
+title: "iNat Image and MetaData Assesment"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+#install the tidyverse library (do this once)
+#install.packages("tidyverse")
+library(tidyverse)
+library(dplyr)
+library(broom) #tidy output
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 4, fig.height = 4, tidy = TRUE)
+
+library(rgbif)
+library(sp) 
+library(rworldmap)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(maptools)
+library(red)
+
+library(knitr)
+#install the tidyverse library (do this once)
+#install.packages("tidyverse")
+library(dplyr)
+library(broom) #tidy output
+#other packages
+library(rgbif)
+library(bRacatus)
+library(raster)
+library(maps)
+library(rangemap)
+library(spData)
+library(CoordinateCleaner)
+library(arakno)
+library(sf)
+library(sp)
+library(rnaturalearth)
+library(RColorBrewer)
+library(countrycode)
+library(tidyverse)
+library(rinat)
+```
+
+1) Set working directory to the directory containing the following:
+  a. iNaturalist (or other biodiverity database) metadata saved as a .csv file.
+  b. Taxoomy reference saved as a ..csv file
+
+Read in files
+```{r}
+#Read in external formatted .csv file containing iNaturalist metadata
+iNatData<-read.csv("") #insert iNaturalist or other biodiversity metadata file
+
+#If iNaturalist data needs to be obtained
+iNatData<-get_inat_obs(
+query = NULL,
+taxon_name = NULL,
+taxon_id = NULL,
+place_id = NULL,
+quality = NULL,
+geo = NULL,
+year = NULL,
+month = NULL,
+day = NULL,
+bounds = NULL,
+maxresults = 100,
+meta = TRUE
+)
+
+
+Taxons<-data.frame(read.csv("Taxon_Names.csv")) #read in taxonomy reference file
+```
+
+Taxonomic Consistency
+```{r}
+
+length_total_unique<- length(iNatData$Obs_ID)
+
+Family <-as.list(Taxons$X1)
+Genus<- as.list(Taxons$X2)
+Species<- as.list(Taxons$X3)
+iNatData[iNatData==""] <- NA
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+#Booleans
+iNatData$Fam_ID_Correct <- as.numeric(iNatData$Family %!in% Family)
+iNatData$Gen_ID_Correct <- as.numeric(iNatData$Genus %!in% Genus)
+iNatData$Sp_ID_Correct <- as.numeric(iNatData$Species %!in% Species)
+
+
+iNatData$Has_Fam_ID<- !is.na(iNatData$Family)
+iNatData$Has_Genus_ID<- !is.na(iNatData$Genus)
+iNatData$Has_Sp_ID<- !is.na(iNatData$Species)
+
+iNatData$captive<-ifelse(iNatData$captive=="false",1,0)
+iNatData$Geo_Tag_Correct<-NULL
+'research' = 1
+'needs-id' = 0
+iNatData$IMG_QUAL<-iNatData$Img_Quality == "research"
+
+Total_Correct<-(iNatData$Fam_ID_Correct+iNatData$Gen_ID_Correct+iNatData$Sp_ID_Correct)
+Total_Have<-(iNatData$Has_Fam_ID+iNatData$Has_Genus_ID+iNatData$Has_Sp_ID)
+iNatData$Avg_Correct<-Total_Have/Total_Correct
+
+Taxonomic_Con<- iNatData[ , c("Family", "Genus", "Species", "Has_Fam_ID", "Has_Genus_ID", "Has_Sp_ID", "Total_Correct", "Total_Have", "Avg_Correct")]
+
+write.csv(Taxonomic_Con, "Taxonomic_Consistency_Results")
+```
+
+
+Determining Geo-tagging Accuracy
+
+```{r}
+#Configure files
+GBIF_occd <- read_csv("GBIF_occd.csv")
+#Read in dataset of Family, Sp, Lat and Long
+iNat_occ_d <- read_csv("iNat_occ_d.csv")
+
+omit_iNat_coor<-na.omit(iNat_occ_d)
+omit_GBIF_coor<- na.omit(GBIF_occd)
+
+```
+
+```{r}
+iNat_dat<-omit_iNat_coor
+GBIF_dat<-omit_GBIF_coor
+
+#Clean GBIF Data
+flags <- clean_coordinates(x = GBIF_dat,
+                           lon = "longitude",
+                           lat = "latitude",
+                           species = "name",
+                          tests = c( "equal","gbif", "institutions",
+                                    "zeros")) # most test are on by default
+
+
+
+
+
+#Read in Taxon Reference
+library(readr)
+WSC <- data.frame(read_csv("taxon.csv"))
+
+```
+
+```{r}
+#Create Confusion Matrix
+confusion_matrix_results<-data.frame(matrix(nrow=0, ncol=8))
+colnames<-c("Species", "True Positive", "True Negative", "False Postive", "False Negative","Accuracy", "Percision", "Recall")
+colnames(confusion_matrix_results)<-colnames
+
+
+
+
+#Calculate 
+group_split(omit_GBIF_coor)
+dfnrow = function(df) (data.frame(count=nrow(df)))
+#group_split(iNat_split)
+count_split_GBIF<-omit_GBIF_coor %>% group_by(name) %>%  do(dfnrow(.))
+ 
+ #subsetGBIF
+ newdata =data.frame()
+ GBIF_list =list()
+ newdata <- subset(count_split_GBIF, count >= 3)
+ GBIF_list=newdata$name
+
+
+ #separate iNat data by species and get >3
+
+iNat_split <- omit_iNat_coor %>%
+  group_by(name)
+iNat_list= list() 
+iNat_list <-as.list(iNat_split$name)
+ both<- intersect(iNat_list, GBIF_list)
+ completelist<-as.list(completelist$X1)
+both<-setdiff(both, completelist)
+ counter = 0
+
+for(i in both){
+counter = counter + 1
+print(counter)
+try({
+  print (i)
+ temp_df = data.frame()
+ iNat_temp =data.frame()
+pts<-data.frame()
+
+ subset_GBIF<- data.frame(subset(omit_GBIF_coor, name == i))
+
+ subset_iNat<-subset(iNat_split, name == i) 
+colnames(subset_GBIF)[1]<-"Species"
+colnames(subset_GBIF)[2]<-"Longitude"
+colnames(subset_GBIF)[3]<-"Latitude"
+
+library(rangemap)
+rangemap_explore(occurrences = subset_GBIF, show_countries = TRUE)
+ temp_GBIF_map<-rangemap_hull(occurrences = subset_GBIF, hull_type = "concave",
+                             buffer_distance = 100000, split = TRUE,
+                             cluster_method = "hierarchical",
+                             split_distance = 1500000)
+  rangemap_plot(temp_GBIF_map)
+
+ 
+
+ p_2<-(temp_GBIF_map@species_range)
+  
+
+  length<-(length(p_2@data$species))
+  ID<-factor(x=1)
+  IDS<- rep(ID, length)
+  p_2@data$ID<-IDS
+  repi<-as.numeric(length(length))
+  origins<-c("Extant (resident)","Introduced","Origin uncertain")
+  repi<-as.numeric(length(temp_GBIF_map@species_range@data$species))
+  p_2@data$legend<- as.factor(rep(origins,length.out=repi))
+  p_2@data <- p_2@data %>% relocate(ID, .before = species)
+  p_2@data <- p_2@data %>% relocate(legend, .before = areakm2)
+  names<- c("ID","binomial","legend","shapearea" )
+  colnames(p_2@data)<-names
+  p_2@data$binomial<-as.factor(p_2@data$binomial)
+  range<-p_2
+
+ 
+inat_sp<- SpatialPoints(subset_iNat[-c(1)])
+
+r <- raster(range, res=.1)
+crs(r) <- "+proj=lcc +lat_1=48 +lat_2=33 +lon_0=-100 +datum=WGS84"
+
+total_cells<- r@ncols*r@nrows
+
+r <- raster::rasterize(inat_sp, r, fun="count")
+
+plot(r)
+
+x <- rasterToPoints(r)
+z <- cbind(cell=cellFromXY(r, x[,1:2]), value=x[,3])
+head(z)
+z_df<- as.data.frame(z)
+
+inat_sp <- subset_iNat %>% 
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326)
+
+#GBIF_long_lat_sf <- subset_GBIF %>% 
+ # st_as_sf(coords = c("longitude", "latitude"), crs = 4326)
+GBIF_sp<- SpatialPoints(subset_GBIF[-c(1)])
+
+r1 <- rasterize(GBIF_sp,r, fun="count")
+
+plot(r1)
+
+x <- rasterToPoints(r1)
+
+z1 <- cbind(cell=cellFromXY(r1, x[,1:2]), value=x[,3])
+head(z1)
+
+cell<-c(seq(1:total_cells))
+df_z<-data.frame(cell)
+df_z['value'] <- NA
+zz <- merge(z, df_z, by= 'cell',all = TRUE)
+zz[is.na(zz)] <- 0
+zz<-zz[-c(3)]
+
+zz1 <- merge(z1, df_z, by= 'cell',all = TRUE)
+zz1[is.na(zz1)] <- 0
+zz1<-zz1[-c(3)]
+
+pred<-as.factor(zz$value.x>0)
+train<-as.factor(zz1$value.x>0)
+
+confMat<-confusionMatrix(pred, train)
+Accuracy<-confMat$byClass['Balanced Accuracy']
+print(Accuracy)
+Percision<- confMat[["byClass"]][["Precision"]]
+Recall<- confMat$byClass['Recall']
+TP<-confMat$table[2,2]
+TN<- confMat$table[1,1]
+FP<-  confMat$table[1,2]
+FN<- confMat$table[2,1] 
+
+newrow<-cbind(i, TP, TN, FP, FN, Accuracy, Percision, Recall)
+data.frame(newrow)
+confusion_matrix_results<-rbind(confusion_matrix_results,newrow)
+})
+}
+
+ write.csv(confusion_matrix_results, "Geo_tagging_Results.csv")
+```
+
+```{r}
+#Make img URL list
+
+cwd_dir = os.getcwd()
+images<- list(iNat_dat$image_url)
+directory = "all_images"
+path = os.path.join(cwd_dir, directory)
+
+os.mkdir (path)
+os.chdir('all_images')
+
+```
+
+Download images from GBIF
+```{pyhon}
+#!/usr/bin/env python
+#Make sure to have enough available space for these images
+!pip3 install tldextract
+import requests
+import os
+import subprocess
+import urllib.request
+from bs4 import BeautifulSoup
+import tldextract
+import wget
+broken_images = []
+
+for img in images:
+  file_name = img.split('/')[-1]
+    print(f"{file_name}")
+     r = requests.get(img, stream=True)
+    if r.status_code == 200:
+        with open(file_name, 'wb') as f:
+            for chunk in r:
+                f.write(chunk)
+    else:
+        broken_images.append(img)
+```
+
+BRISQUE can be run in MatLab using batch processing and the following:
+
+rows = height(Image_URLS); 
+for row = 1:rows 
+try
+ photo= urlread(row);
+     i = brisque(photo)
+     fprintf(targFilename,i);
+   catch ME
+     fprintf('Failed: %s\n', ME.message); 
+     continue;
+   end    
+end
+
+
+Image Quality
+```{r}
+#Read in BRISQUE results
+scores<-read_csv("FINAL_SCORES_IDS.csv")
+families_ID<-read_csv("Taxonomy_Img_ID_SpiderData2.csv")
+
+#Use BRISQUE Results internally
+
+#Analyze BRISQUE Results
+Families<-unique(families_ID$Family)
+df<-inner_join(scores, families_ID, by = "ID")
+agg_Family<- aggregate(df$Scores, by=list(Category=df$Family), FUN=mean)
+agg_Genus<-aggregate(df$Scores, by=list(Category=df$Genus), FUN=mean)
+agg_sp<-aggregate(df$Scores, by=list(Category=df$Species), FUN=mean)
+write_csv(agg, "Brisque_Scores_Aggregated.csv")
+
+```
+
